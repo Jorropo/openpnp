@@ -19,7 +19,9 @@ import org.openpnp.model.Configuration;
 import org.openpnp.model.Location;
 import org.openpnp.model.Solutions;
 import org.openpnp.spi.*;
+import org.openpnp.util.MovableUtils;
 import org.pmw.tinylog.Logger;
+import org.python.antlr.op.In;
 import org.simpleframework.xml.Attribute;
 import org.simpleframework.xml.Element;
 
@@ -50,6 +52,9 @@ public class PhotonFeeder extends ReferenceFeeder {
     private Location offset;
 
     private static PhotonBusInterface photonBus;
+
+    @Attribute(required = false)
+    protected boolean moveWhileFeeding = true;
 
     public PhotonFeeder() {
         Configuration.get().addListener(new ConfigurationListener.Adapter() {
@@ -117,6 +122,14 @@ public class PhotonFeeder extends ReferenceFeeder {
 
     public Location getOffset() {
         return offset;
+    }
+
+    public boolean isMoveWhileFeeding() {
+		return moveWhileFeeding;
+	}
+
+	public void setMoveWhileFeed(boolean moveWhileFeeding) {
+        this.moveWhileFeeding = moveWhileFeeding;
     }
 
     @Override
@@ -281,13 +294,19 @@ public class PhotonFeeder extends ReferenceFeeder {
             // but use polling to check the status of the feed.
             Duration expectedFeedDuration = Duration.ofMillis(moveFeedForwardResponse.expectedTimeToFeed);
             Instant endTime = Instant.now().plus(expectedFeedDuration.multipliedBy(3));
-            while (Instant.now().isBefore(endTime)) {
-                Thread.sleep(50);
 
+            if (nozzle != null && isMoveWhileFeeding()) {
+                MovableUtils.moveToLocationAtSafeZ(nozzle, getPickLocation().derive(null, null, Double.NaN, null));
+            }
+
+            // make sure to try alteast 3 times
+            // needed for when the nozzle takes longer to move than endTime
+            for (int j = 0; Instant.now().isBefore(endTime) || j < 3; j++) {
                 MoveFeedStatus moveFeedStatus = new MoveFeedStatus(slotAddress);
                 MoveFeedStatus.Response moveFeedStatusResponse = moveFeedStatus.send(photonBus);
 
                 if (moveFeedStatusResponse == null) {
+                    Thread.sleep(50);
                     continue; // Timeout. retry after delay.
                 }
 
